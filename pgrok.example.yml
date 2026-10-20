@@ -9,3 +9,7 @@ token: "REDACTED"
 # Dynamic forward rules and use "forward_addr" as catch-all.
 #dynamic_forwards: |
 #  /api http://localhost:8080
+
+# Require visitors of HTTP tunnels to present basic auth ("username:password").
+# Also settable via --basic-auth / PGROK_BASIC_AUTH.
+#basic_auth: "username:password"

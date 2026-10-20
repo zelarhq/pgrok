@@ -54,6 +54,12 @@ func commandHTTP(homeDir string, logger *logx.Logger) *cli.Command {
 				Usage:   "specify a custom subdomain prefix for a deterministic tunnel URL",
 				Aliases: []string{"s"},
 			},
+			&cli.StringFlag{
+				Name:    "basic-auth",
+				Usage:   `require visitors to present HTTP basic auth, in the form of "username:password"`,
+				Aliases: []string{"a"},
+				Sources: cli.EnvVars("PGROK_BASIC_AUTH"),
+			},
 		),
 	}
 }
@@ -115,6 +121,7 @@ func actionHTTP(ctx context.Context, cmd *cli.Command, logger *logx.Logger) erro
 			surl.Host,
 			anyx.Coalesce(cmd.String("token"), config.Token),
 			cmd.String("subdomain"),
+			anyx.Coalesce(cmd.String("basic-auth"), config.BasicAuth),
 		)
 		if err != nil {
 			if time.Now().After(cooldownAfter) {
@@ -128,6 +135,9 @@ func actionHTTP(ctx context.Context, cmd *cli.Command, logger *logx.Logger) erro
 			if strings.Contains(err.Error(), "no supported methods remain") {
 				logger.FatalContext(ctx, "Please double check your token and try again")
 			}
+			if strings.Contains(err.Error(), "basic auth") {
+				logger.FatalContext(ctx, "Refusing to expose the tunnel without basic auth")
+			}
 			time.Sleep(backoff)
 			cooldownAfter = time.Now().Add(time.Minute)
 		}
@@ -139,6 +149,7 @@ type Config struct {
 	ForwardAddr     string `yaml:"forward_addr"`
 	Token           string `yaml:"token"`
 	DynamicForwards string `yaml:"dynamic_forwards"`
+	BasicAuth       string `yaml:"basic_auth"`
 }
 
 func loadConfig(configPath string) (*Config, error) {
@@ -160,7 +171,7 @@ const (
 	protocolTCP  string = "tcp"
 )
 
-func tryConnect(logger *logx.Logger, protocol, remoteAddr, forwardAddr, token, subdomain string) error {
+func tryConnect(logger *logx.Logger, protocol, remoteAddr, forwardAddr, token, subdomain, basicAuth string) error {
 	client, err := ssh.Dial(
 		"tcp",
 		remoteAddr,
@@ -177,7 +188,7 @@ func tryConnect(logger *logx.Logger, protocol, remoteAddr, forwardAddr, token, s
 	}
 
 	// Hint the server before establishing the reverse tunnel
-	payload, err := json.Marshal(map[string]string{"protocol": protocol, "subdomain": subdomain})
+	payload, err := json.Marshal(map[string]string{"protocol": protocol, "subdomain": subdomain, "basic_auth": basicAuth})
 	if err != nil {
 		return errors.Wrap(err, "marshal payload")
 	}
@@ -197,7 +208,8 @@ func tryConnect(logger *logx.Logger, protocol, remoteAddr, forwardAddr, token, s
 
 	// Query the server info after the reverse tunnel is established
 	var serverInfo struct {
-		HostURL string `json:"host_url"`
+		HostURL   string `json:"host_url"`
+		BasicAuth string `json:"basic_auth"`
 	}
 	ok, reply, err = client.SendRequest("server-info", true, payload)
 	if err != nil {
@@ -208,6 +220,11 @@ func tryConnect(logger *logx.Logger, protocol, remoteAddr, forwardAddr, token, s
 	err = json.Unmarshal(reply, &serverInfo)
 	if err != nil {
 		return errors.Wrap(err, "unmarshal server info")
+	}
+	// Servers without basic auth support silently ignore the hint field, so the
+	// tunnel would be public. Fail closed unless the server confirms it.
+	if basicAuth != "" && serverInfo.BasicAuth != "enabled" {
+		return errors.New("server does not support basic auth")
 	}
 
 	message := "🎉 You're ready to go live!"

@@ -1,0 +1,57 @@
+# Zelar fork build. Upstream workflows are gated on github.repository == 'pgrok/pgrok'
+# and never run here. Push a tag like v1.7.0-zelar.1 to publish:
+#   - ghcr.io/zelarhq/pgrokd:1.7.0-zelar.1 (linux/amd64 — zelar-node-01)
+#   - pgrok client binaries attached to the GitHub release
+name: Zelar fork
+on:
+  push:
+    tags: ['v*-zelar.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  pgrokd-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: echo "IMAGE_TAG=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          build-args: BUILD_VERSION=${{ env.IMAGE_TAG }}
+          platforms: linux/amd64
+          push: true
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: ghcr.io/zelarhq/pgrokd:${{ env.IMAGE_TAG }}
+
+  pgrok-client:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: go.mod
+      - name: Build binaries
+        run: |
+          set -eu
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+            os=${target%/*} arch=${target#*/}
+            ext=""; [ "$os" = windows ] && ext=.exe
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-X main.version=${GITHUB_REF_NAME#v}" \
+              -o "dist/pgrok_${os}_${arch}${ext}" ./pgrok/cli
+          done
+          (cd dist && sha256sum * > checksums.txt)
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file ZELAR.md

@@ -33,6 +33,7 @@ type Client struct {
 	protocol    string
 	host        string
 	customHost  bool // whether host carries a client-requested subdomain prefix
+	basicAuth   reverseproxy.BasicAuth
 	ready       context.Context
 	signalReady context.CancelCauseFunc
 }
@@ -46,10 +47,27 @@ var subdomainPrefixCharsRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
 // dnsLabelMaxLen is the maximum length of a single DNS label (RFC 1035).
 const dnsLabelMaxLen = 63
 
+// basicAuthMinPasswordLen is the minimum password length accepted for tunnel
+// basic authentication.
+const basicAuthMinPasswordLen = 8
+
+// parseBasicAuth parses a "username:password" credential.
+func parseBasicAuth(s string) (reverseproxy.BasicAuth, error) {
+	username, password, ok := strings.Cut(s, ":")
+	if !ok || username == "" {
+		return reverseproxy.BasicAuth{}, errors.New(`invalid basic auth: must be in the form of "username:password"`)
+	}
+	if len(password) < basicAuthMinPasswordLen {
+		return reverseproxy.BasicAuth{}, errors.Errorf("invalid basic auth: password must be at least %d characters", basicAuthMinPasswordLen)
+	}
+	return reverseproxy.BasicAuth{Username: username, Password: password}, nil
+}
+
 func (c *Client) handleHint(req *ssh.Request) {
 	var payload struct {
 		Protocol  string `json:"protocol"`
 		Subdomain string `json:"subdomain,omitempty"`
+		BasicAuth string `json:"basic_auth,omitempty"`
 	}
 	err := json.Unmarshal(req.Payload, &payload)
 	if err != nil {
@@ -83,6 +101,20 @@ func (c *Client) handleHint(req *ssh.Request) {
 		}
 		c.host = payload.Subdomain + "-" + c.host
 		c.customHost = true
+	}
+	// The client may require visitors of an HTTP tunnel to present a basic
+	// authentication credential.
+	if payload.BasicAuth != "" {
+		if payload.Protocol != "http" {
+			_ = req.Reply(false, []byte("basic auth is only supported for http"))
+			return
+		}
+		auth, err := parseBasicAuth(payload.BasicAuth)
+		if err != nil {
+			_ = req.Reply(false, []byte(err.Error()))
+			return
+		}
+		c.basicAuth = auth
 	}
 	c.protocol = payload.Protocol
 	_ = req.Reply(true, nil)
@@ -252,7 +284,7 @@ func (c *Client) handleTCPIPForward(
 			id := uuid.New()
 			alternative = hex.EncodeToString(id[:]) + "-" + c.host
 		}
-		host, err := proxies.Set(c.host, alternative, listener.Addr().String())
+		host, err := proxies.Set(c.host, alternative, listener.Addr().String(), c.basicAuth)
 		if err != nil {
 			if c.customHost {
 				err = errors.Errorf("requested subdomain %q is already in use", c.host)
@@ -324,9 +356,15 @@ func (c *Client) handleServerInfo(proxy conf.Proxy, req *ssh.Request) {
 		return
 	}
 
-	resp, err := json.Marshal(map[string]string{
+	info := map[string]string{
 		"host_url": hostURL,
-	})
+	}
+	// Lets the client verify the tunnel is actually protected, so it fails closed
+	// against servers that do not support basic auth and ignore the hint field.
+	if c.basicAuth.Username != "" {
+		info["basic_auth"] = "enabled"
+	}
+	resp, err := json.Marshal(info)
 	if err != nil {
 		c.logger.Error("Failed to marshal server info",
 			"remote", c.serverConn.RemoteAddr(),
