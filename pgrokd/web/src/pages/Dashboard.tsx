@@ -180,7 +180,10 @@ export default function DashboardPage() {
             <Recipe title="Pick a fixed subdomain" result={urlFor("demo-")}>
               <CodeBlock code={`${bin} http ${p} --subdomain demo`} />
             </Recipe>
-            <Recipe title="Protect it with a password" result="Visitors get a username/password prompt">
+            <Recipe
+              title="Protect it with a password"
+              result="Password ≥ 8 chars. Pass --basic-auth to pgrok init to always require it."
+            >
               <CodeBlock code={`${bin} http ${p} --basic-auth 'user:a-long-password'`} />
             </Recipe>
             <Recipe title="Expose a TCP port" result={`tcp://${user.tcpHost}:<${user.tcpPortStart}–${user.tcpPortEnd}>`}>

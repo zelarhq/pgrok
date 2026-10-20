@@ -20,6 +20,7 @@ import (
 	"unknwon.dev/x/logx"
 
 	"github.com/pgrok/pgrok/internal/dynamicforward"
+	"github.com/pgrok/pgrok/internal/reverseproxy"
 )
 
 func commandHTTP(homeDir string, logger *logx.Logger) *cli.Command {
@@ -59,6 +60,10 @@ func commandHTTP(homeDir string, logger *logx.Logger) *cli.Command {
 				Usage:   `require visitors to present HTTP basic auth, in the form of "username:password"`,
 				Aliases: []string{"a"},
 				Sources: cli.EnvVars("PGROK_BASIC_AUTH"),
+				Action: func(_ context.Context, _ *cli.Command, s string) error {
+					_, err := reverseproxy.ParseBasicAuth(s)
+					return err
+				},
 			},
 		),
 	}

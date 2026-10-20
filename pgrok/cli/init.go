@@ -10,7 +10,17 @@ import (
 
 	"github.com/urfave/cli/v3"
 	"unknwon.dev/x/logx"
+
+	"github.com/pgrok/pgrok/internal/reverseproxy"
 )
+
+func basicAuthLine(basicAuth string) string {
+	if basicAuth == "" {
+		return `#basic_auth: "username:password"`
+	}
+	// %q yields a valid YAML double-quoted scalar for any password.
+	return fmt.Sprintf("basic_auth: %q", basicAuth)
+}
 
 func commandInit(homeDir string, logger *logx.Logger) *cli.Command {
 	return &cli.Command{
@@ -41,6 +51,15 @@ func commandInit(homeDir string, logger *logx.Logger) *cli.Command {
 				Usage:    "The authentication token",
 				Required: true,
 				Aliases:  []string{"t"},
+			},
+			&cli.StringFlag{
+				Name:    "basic-auth",
+				Usage:   `require visitors of HTTP tunnels to present basic auth, in the form of "username:password"`,
+				Aliases: []string{"a"},
+				Action: func(_ context.Context, _ *cli.Command, s string) error {
+					_, err := reverseproxy.ParseBasicAuth(s)
+					return err
+				},
 			},
 		),
 	}
@@ -81,6 +100,9 @@ forward_addr: "%s"
 # The authentication token.
 token: "%s"
 
+# Require visitors of HTTP tunnels to present basic auth ("username:password").
+%s
+
 # Dynamic forward rules and use "forward_addr" as catch-all.
 #dynamic_forwards: |
 #  /api http://localhost:8080`
@@ -89,6 +111,7 @@ token: "%s"
 		cmd.String("remote-addr"),
 		cmd.String("forward-addr"),
 		cmd.String("token"),
+		basicAuthLine(cmd.String("basic-auth")),
 	)
 	configPath := cmd.String("config")
 	configDir := filepath.Dir(configPath)

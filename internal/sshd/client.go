@@ -47,22 +47,6 @@ var subdomainPrefixCharsRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
 // dnsLabelMaxLen is the maximum length of a single DNS label (RFC 1035).
 const dnsLabelMaxLen = 63
 
-// basicAuthMinPasswordLen is the minimum password length accepted for tunnel
-// basic authentication.
-const basicAuthMinPasswordLen = 8
-
-// parseBasicAuth parses a "username:password" credential.
-func parseBasicAuth(s string) (reverseproxy.BasicAuth, error) {
-	username, password, ok := strings.Cut(s, ":")
-	if !ok || username == "" {
-		return reverseproxy.BasicAuth{}, errors.New(`invalid basic auth: must be in the form of "username:password"`)
-	}
-	if len(password) < basicAuthMinPasswordLen {
-		return reverseproxy.BasicAuth{}, errors.Errorf("invalid basic auth: password must be at least %d characters", basicAuthMinPasswordLen)
-	}
-	return reverseproxy.BasicAuth{Username: username, Password: password}, nil
-}
-
 func (c *Client) handleHint(req *ssh.Request) {
 	var payload struct {
 		Protocol  string `json:"protocol"`
@@ -109,7 +93,7 @@ func (c *Client) handleHint(req *ssh.Request) {
 			_ = req.Reply(false, []byte("basic auth is only supported for http"))
 			return
 		}
-		auth, err := parseBasicAuth(payload.BasicAuth)
+		auth, err := reverseproxy.ParseBasicAuth(payload.BasicAuth)
 		if err != nil {
 			_ = req.Reply(false, []byte(err.Error()))
 			return

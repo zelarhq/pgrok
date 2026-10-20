@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/puzpuzpuz/xsync/v2"
@@ -15,6 +16,22 @@ import (
 type BasicAuth struct {
 	Username string
 	Password string
+}
+
+// BasicAuthMinPasswordLen is the minimum password length accepted for tunnel
+// basic authentication.
+const BasicAuthMinPasswordLen = 8
+
+// ParseBasicAuth parses a "username:password" credential.
+func ParseBasicAuth(s string) (BasicAuth, error) {
+	username, password, ok := strings.Cut(s, ":")
+	if !ok || username == "" {
+		return BasicAuth{}, errors.New(`invalid basic auth: must be in the form of "username:password"`)
+	}
+	if len(password) < BasicAuthMinPasswordLen {
+		return BasicAuth{}, errors.Errorf("invalid basic auth: password must be at least %d characters", BasicAuthMinPasswordLen)
+	}
+	return BasicAuth{Username: username, Password: password}, nil
 }
 
 // Cluster contains a list of proxies identified by their hosts.

@@ -7,6 +7,7 @@ Runs at `tunnel.zelar.com` (deployed from `zelarhq/openops` → `kustomize/pgrok
 
 ```bash
 pgrok http 3000 --basic-auth 'user:password'      # or -a, PGROK_BASIC_AUTH, or `basic_auth:` in pgrok.yml
+pgrok init ... --basic-auth 'user:password'       # saves it to pgrok.yml for every run
 ```
 
 - HTTP tunnels only; password ≥ 8 chars. Credential lives in pgrokd memory for the session only (never in the DB).
