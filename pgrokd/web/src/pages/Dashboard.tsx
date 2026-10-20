@@ -61,6 +61,7 @@ export default function DashboardPage() {
   const user = useUser();
   const [revealToken, setRevealToken] = useState(false);
   const [port, setPort] = useState("3000");
+  const [platform, setPlatform] = useState<Platform>(detectPlatform);
   const p = port || "3000";
   const bin = detectPlatform() === "windows" ? String.raw`.\pgrok.exe` : "pgrok";
   const urlFor = (prefix: string) => `${user.scheme}://${prefix}${user.subdomain}.${user.domain}`;
@@ -93,7 +94,7 @@ export default function DashboardPage() {
       <main className="mx-auto max-w-5xl space-y-10 px-4 py-10 sm:px-6 lg:px-8">
         <header>
           <Text as="h1">Hi, {user.displayName}</Text>
-          <Text className="mt-2 text-muted-foreground">Expose a local server to the internet in three steps.</Text>
+          <Text className="mt-2 text-muted-foreground">Expose a local server to the internet with one command.</Text>
         </header>
 
         {/* Account */}
@@ -132,46 +133,85 @@ export default function DashboardPage() {
           </Card.Content>
         </Card>
 
-        {/* Quick start */}
+        {/* Quick install */}
         <section>
-          <Text as="h2">Get started</Text>
-          <ol className="mt-4 space-y-4">
-            <Step n={1} title="Install the CLI">
-              <InstallTabs />
-            </Step>
-            <Step n={2} title="Save your connection settings">
-              <Text className="mb-3 text-sm text-muted-foreground">
-                Writes <code className="font-mono">~/.pgrok/pgrok.yml</code> so later commands need no flags.
-              </Text>
-              <CodeBlock
-                code={`${bin} init --remote-addr ${user.remoteAddr} --forward-addr http://localhost:${p} --token ${user.token}`}
-                secret={user.token}
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <Text as="h2">Get started</Text>
+            <PortInput value={port} onChange={setPort} />
+          </div>
+          <Card className="mt-4 block w-full">
+            <Card.Content className="space-y-4">
+              <div>
+                <Text as="h5">Install and run as a service</Text>
+                <Text className="mt-1 text-sm text-muted-foreground">
+                  One command downloads pgrok, saves your settings and keeps the tunnel to{" "}
+                  <code className="font-mono">localhost:{p}</code> running in the background, including after a
+                  reboot.
+                </Text>
+              </div>
+              <QuickInstall
+                platform={platform}
+                setPlatform={setPlatform}
+                port={p}
+                token={user.token}
                 reveal={revealToken}
               />
-            </Step>
-            <Step n={3} title="Start a tunnel">
-              <CodeBlock code={`${bin} http ${p}`} />
-              <Text className="mt-3 text-sm">
+              <Text className="text-sm">
                 Then open <Link href={user.url}>{user.url}</Link>.
               </Text>
-            </Step>
-          </ol>
+            </Card.Content>
+          </Card>
+
+          <Card className="mt-4 block w-full">
+            <Card.Content>
+              <Text as="h6">Manage the service</Text>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {serviceCommands(platform).map(([label, code]) => (
+                  <div key={label} className="min-w-0">
+                    <div className="mb-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                      {label}
+                    </div>
+                    <CodeBlock code={code} />
+                  </div>
+                ))}
+              </div>
+            </Card.Content>
+          </Card>
+
+          <details className="group mt-4">
+            <summary className="cursor-pointer font-head text-lg select-none">
+              Manual setup <span className="text-sm font-sans text-muted-foreground">(no service, run it yourself)</span>
+            </summary>
+            <ol className="mt-4 space-y-4">
+              <Step n={1} title="Install the CLI">
+                <InstallTabs />
+              </Step>
+              <Step n={2} title="Save your connection settings">
+                <Text className="mb-3 text-sm text-muted-foreground">
+                  Writes <code className="font-mono">~/.pgrok/pgrok.yml</code> so later commands need no flags.
+                </Text>
+                <CodeBlock
+                  code={`${bin} init --remote-addr ${user.remoteAddr} --forward-addr http://localhost:${p} --token ${user.token}`}
+                  secret={user.token}
+                  reveal={revealToken}
+                />
+              </Step>
+              <Step n={3} title="Start a tunnel">
+                <CodeBlock code={`${bin} http ${p}`} />
+                <Text className="mt-3 text-sm text-muted-foreground">
+                  Runs in the foreground. Turn it into a service any time with{" "}
+                  <code className="font-mono">pgrok service install</code>.
+                </Text>
+              </Step>
+            </ol>
+          </details>
         </section>
 
         {/* Recipes */}
         <section>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <Text as="h2">Usage</Text>
-            <label className="flex items-center gap-2 text-sm font-semibold">
-              Local port
-              <input
-                className="w-24 rounded border-2 border-border bg-card px-2 py-1 font-mono shadow-sm focus-visible:outline-2 focus-visible:outline-primary"
-                inputMode="numeric"
-                placeholder="3000"
-                value={port}
-                onChange={(event) => setPort(digitsOnly(event.target.value).slice(0, 5))}
-              />
-            </label>
+            <PortInput value={port} onChange={setPort} />
           </div>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <Recipe title="Expose an HTTP server" result={user.url}>
@@ -182,7 +222,7 @@ export default function DashboardPage() {
             </Recipe>
             <Recipe
               title="Protect it with a password"
-              result="Password ≥ 8 chars. Pass --basic-auth to pgrok init to always require it."
+              result="Password must be at least 8 characters"
             >
               <CodeBlock code={`${bin} http ${p} --basic-auth 'user:a-long-password'`} />
             </Recipe>
@@ -210,10 +250,14 @@ export default function DashboardPage() {
           <Card.Content>
             <dl className="divide-y-2 divide-border text-sm">
               <Faq q={`"query server info rejected" or "server does not support basic auth"`}>
-                Your client doesn&apos;t match this server. Reinstall it with step 1.
+                Your client doesn&apos;t match this server. Re-run the install command above.
               </Faq>
               <Faq q={`"no supported methods remain"`}>
                 The token is wrong or outdated. Copy it again from this page and re-run step 2.
+              </Faq>
+              <Faq q="The tunnel stopped working">
+                Check <code className="font-mono">pgrok service status</code> and the logs listed under Manage the
+                service. It reconnects on its own after network drops and restarts if it crashes.
               </Faq>
               <Faq q="502 when opening the URL">
                 Nothing is listening on <code className="font-mono">localhost:{p}</code>, or the client isn&apos;t running.
@@ -227,6 +271,80 @@ export default function DashboardPage() {
         </Card>
       </main>
     </div>
+  );
+}
+
+function QuickInstall({
+  platform,
+  setPlatform,
+  port,
+  token,
+  reveal,
+}: {
+  platform: Platform;
+  setPlatform: (platform: Platform) => void;
+  port: string;
+  token: string;
+  reveal: boolean;
+}) {
+  const origin = globalThis.location.origin;
+  const code =
+    platform === "windows"
+      ? `& ([scriptblock]::Create((irm ${origin}/install.ps1))) -Token ${token} -ForwardAddr ${port}`
+      : `curl -fsSL ${origin}/install.sh | sh -s -- --token ${token} --forward-addr ${port}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Operating system">
+        {PLATFORMS.map((x) => (
+          <Segment key={x.id} active={x.id === platform} onClick={() => setPlatform(x.id)}>
+            {x.label}
+          </Segment>
+        ))}
+      </div>
+      <CodeBlock code={code} secret={token} reveal={reveal} />
+      <Text className="text-sm text-muted-foreground">
+        {platform === "windows" &&
+          "Run in an Administrator PowerShell — it installs a Windows service that starts with Windows. "}
+        {platform === "linux" && "Asks for sudo to install a systemd service that runs as you and starts on boot. "}
+        {platform === "macos" && "Asks for your password to put pgrok in /usr/local/bin; runs as a login item. "}
+        Add <code className="font-mono">{platform === "windows" ? "-BasicAuth" : "--basic-auth"} &apos;user:password&apos;</code>{" "}
+        to password-protect the tunnel.
+      </Text>
+    </div>
+  );
+}
+
+function serviceCommands(platform: Platform): [string, string][] {
+  if (platform === "windows") {
+    return [
+      ["Status", "pgrok service status"],
+      ["Restart after editing the config", "pgrok service restart"],
+      ["Logs", String.raw`Get-Content $env:USERPROFILE\.pgrok\pgrok.log -Wait`],
+      ["Uninstall (Administrator)", "pgrok service uninstall"],
+    ];
+  }
+  const sudo = platform === "linux" ? "sudo " : "";
+  return [
+    ["Status", "pgrok service status"],
+    ["Restart after editing ~/.pgrok/pgrok.yml", `${sudo}pgrok service restart`],
+    ["Logs", platform === "linux" ? "journalctl -u pgrok -f" : "tail -f ~/Library/Logs/pgrok.err.log"],
+    ["Uninstall", `${sudo}pgrok service uninstall`],
+  ];
+}
+
+function PortInput({ value, onChange }: { value: string; onChange: (port: string) => void }) {
+  return (
+    <label className="flex items-center gap-2 text-sm font-semibold">
+      Local port
+      <input
+        className="w-24 rounded border-2 border-border bg-card px-2 py-1 font-mono shadow-sm focus-visible:outline-2 focus-visible:outline-primary"
+        inputMode="numeric"
+        placeholder="3000"
+        value={value}
+        onChange={(event) => onChange(digitsOnly(event.target.value).slice(0, 5))}
+      />
+    </label>
   );
 }
 

@@ -62,6 +62,10 @@ func NewServer(logger *logx.Logger, config *conf.Config, db *database.DB) (*http
 		f.Get("/identity-provider", getIdentityProvider)
 	})
 
+	// Client install scripts, linked from the dashboard.
+	f.Get("/install.sh", serveInstallScript(config, installSh, "text/x-shellscript; charset=utf-8"))
+	f.Get("/install.ps1", serveInstallScript(config, installPs1, "text/plain; charset=utf-8"))
+
 	// Human-facing web routes, namespaced under "/-".
 	f.Group("/-", func() {
 		f.Get("/healthcheck", getHealthcheck)

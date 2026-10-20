@@ -13,7 +13,54 @@ permissions:
   packages: write
 
 jobs:
+  # Runs the real install.ps1 against a locally served build: the service must
+  # survive past the SCM 30s start timeout, log to pgrok.log, restart after
+  # being killed, and uninstall cleanly. Gates publishing the client.
+  windows-service-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: go.mod
+      - name: Build and serve the client
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dl | Out-Null
+          go build -o dl/pgrok_windows_amd64.exe ./pgrok/cli
+          Start-Process python -ArgumentList "-m","http.server","18999","--directory","dl" -WindowStyle Hidden
+          (Get-Content pgrokd/cli/internal/web/install/install.ps1 -Raw).
+            Replace("__SERVER_URL__", "http://127.0.0.1:3320").
+            Replace("__REMOTE_ADDR__", "127.0.0.1:1").
+            Replace("__DOWNLOAD_URL__", "http://127.0.0.1:18999") | Set-Content install.ps1
+          Start-Sleep 2
+      - name: install.ps1 installs and starts the service
+        shell: powershell # Windows PowerShell 5.1, what users have by default
+        run: |
+          & ([scriptblock]::Create((Get-Content install.ps1 -Raw))) -Token test-token -ForwardAddr 3000 -BasicAuth "alice:s3cret-pass"
+          Start-Sleep 40
+          $svc = Get-Service pgrok
+          if ($svc.Status -ne "Running") { throw "service not running after 40s: $($svc.Status)" }
+          if ((Get-CimInstance Win32_Service -Filter "Name='pgrok'").StartMode -ne "Auto") { throw "service is not set to start automatically" }
+          $log = Join-Path $env:USERPROFILE ".pgrok\pgrok.log"
+          Get-Content $log -Tail 5
+          if (-not (Select-String -Path $log -Pattern "Failed to connect" -Quiet)) { throw "expected reconnect attempts in $log" }
+      - name: Service restarts after being killed
+        shell: powershell
+        run: |
+          $before = (Get-CimInstance Win32_Service -Filter "Name='pgrok'").ProcessId
+          Stop-Process -Id $before -Force
+          Start-Sleep 15
+          $after = (Get-CimInstance Win32_Service -Filter "Name='pgrok'").ProcessId
+          if ((Get-Service pgrok).Status -ne "Running" -or $after -eq $before -or $after -eq 0) { throw "service did not restart ($before -> $after)" }
+      - name: Uninstall
+        shell: powershell
+        run: |
+          & "$env:ProgramFiles\pgrok\pgrok.exe" service uninstall
+          if (Get-Service pgrok -ErrorAction SilentlyContinue) { throw "service still installed" }
+
   pgrokd-image:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -34,6 +81,7 @@ jobs:
           tags: ghcr.io/zelarhq/pgrokd:${{ env.IMAGE_TAG }}
 
   pgrok-client:
+    needs: windows-service-test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:

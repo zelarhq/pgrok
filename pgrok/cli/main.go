@@ -73,6 +73,7 @@ func main() {
 			commandInit(homeDir, logger),
 			commandHTTP(homeDir, logger),
 			commandTCP(homeDir, logger),
+			commandService(homeDir, logger),
 		},
 		Flags: commonFlags(homeDir, logger),
 	}
