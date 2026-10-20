@@ -16,13 +16,7 @@ axios.defaults.withCredentials = true;
 const user = await axios
   .get("/api/user-info")
   .then((response) => {
-    const { displayName, token, url } = response.data as UserContextType;
-    return {
-      authed: true,
-      displayName: displayName,
-      token: token,
-      url: url,
-    } as UserContextType;
+    return { ...(response.data as UserContextType), authed: true };
   })
   .catch(() => {
     return {} as UserContextType;

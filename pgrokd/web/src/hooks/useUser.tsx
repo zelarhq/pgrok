@@ -5,6 +5,13 @@ export interface UserContextType {
   displayName: string;
   token: string;
   url: string;
+  subdomain: string;
+  domain: string;
+  scheme: string;
+  remoteAddr: string;
+  tcpHost: string;
+  tcpPortStart: number;
+  tcpPortEnd: number;
 }
 
 const UserContext = createContext<UserContextType>({} as UserContextType);
